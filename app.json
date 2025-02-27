@@ -1,0 +1,91 @@
+{
+  "expo": {
+    "name": "AI Notes",
+    "slug": "ai-notes-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#6200ee"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourcompany.ainotes",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to provide location-based reminders.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location in the background to notify you of location-based reminders.",
+        "NSLocationAlwaysUsageDescription": "This app uses your location in the background to notify you of location-based reminders.",
+        "NSMicrophoneUsageDescription": "This app uses your microphone for voice input and commands.",
+        "NSCameraUsageDescription": "This app uses your camera to scan documents and images for your notes.",
+        "NSPhotoLibraryUsageDescription": "This app accesses your photo library to attach images to your notes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#6200ee"
+      },
+      "package": "com.yourcompany.ainotes",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO",
+        "VIBRATE",
+        "com.google.android.gms.permission.ACTIVITY_RECOGNITION"
+      ],
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow AI Notes to use your location for location-based reminders.",
+          "locationAlwaysPermission": "Allow AI Notes to use your location in the background for location-based reminders.",
+          "locationWhenInUsePermission": "Allow AI Notes to use your location for location-based reminders."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#6200ee"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow AI Notes to access your camera to scan documents and images."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow AI Notes to access your photos to attach images to your notes.",
+          "savePhotosPermission": "Allow AI Notes to save photos to your photo library.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "your-eas-project-id"
+      }
+    }
+  }
+}
