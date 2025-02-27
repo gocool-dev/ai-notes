@@ -1,6 +1,6 @@
 {
   "name": "ai-notes-app",
-  "main": "expo-router/entry",
+  "main": "node_modules/expo/AppEntry.js",
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
@@ -39,6 +39,7 @@
     "expo-status-bar": "~2.0.1",
     "expo-symbols": "~0.2.2",
     "expo-system-ui": "~4.0.8",
+    "expo-task-manager": "~12.0.5",
     "expo-web-browser": "~14.0.2",
     "firebase": "^11.3.1",
     "react": "18.3.1",
