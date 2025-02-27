@@ -19,7 +19,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourcompany.ainotes",
+      "bundleIdentifier": "com.gk.ainotes",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app uses your location to provide location-based reminders.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location in the background to notify you of location-based reminders.",
@@ -34,7 +34,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#6200ee"
       },
-      "package": "com.yourcompany.ainotes",
+      "package": "com.gk.ainotes",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",

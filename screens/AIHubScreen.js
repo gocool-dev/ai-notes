@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   StyleSheet, 
   View, 
@@ -20,10 +20,11 @@ import {
   Chip 
 } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
+import { WebView } from 'react-native-webview';
 
 // Import services
 import openaiService from '../services/openai';
-import voiceService from '../services/voiceService';
+import voiceService, { WebSpeechRecognition } from '../services/voiceService';
 
 // Import theme
 import theme from '../config/theme';
@@ -47,6 +48,9 @@ const AIHubScreen = () => {
   
   // State for voice input
   const [isVoiceInputActive, setIsVoiceInputActive] = useState(false);
+  
+  // WebView reference for voice recognition
+  const webViewRef = useRef(null);
 
   // Process the input text with AI
   const processWithAI = async (type) => {
@@ -91,22 +95,34 @@ const AIHubScreen = () => {
   // Handle voice input
   const handleVoiceInput = () => {
     setIsVoiceInputActive(true);
-    
-    voiceService.performVoiceSearch((result) => {
-      setIsVoiceInputActive(false);
+  };
+  
+  // Handle WebView message for voice recognition
+  const handleVoiceMessage = (event) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
       
-      if (!result.error && result.results.length > 0) {
+      if (data.type === 'FINAL' && data.message) {
         setInputText((prev) => {
           if (prev.trim() === '') {
-            return result.results[0];
+            return data.message;
           } else {
-            return prev + ' ' + result.results[0];
+            return prev + ' ' + data.message;
           }
         });
-      } else {
-        Alert.alert('Voice Input', result.message);
+        
+        // Close voice input after result
+        setTimeout(() => {
+          setIsVoiceInputActive(false);
+        }, 1000);
+      } else if (data.type === 'ERROR') {
+        Alert.alert('Voice Input', data.message || 'Error with voice recognition');
+        setIsVoiceInputActive(false);
       }
-    });
+    } catch (error) {
+      console.error('Error parsing voice message:', error);
+      setIsVoiceInputActive(false);
+    }
   };
   
   // Speak text using text-to-speech
@@ -121,6 +137,14 @@ const AIHubScreen = () => {
 
   return (
     <ScrollView style={styles.container}>
+      {/* Hidden WebView for voice recognition */}
+      {isVoiceInputActive && (
+        <WebSpeechRecognition
+          onMessage={handleVoiceMessage}
+          hidden={true}
+        />
+      )}
+      
       <Card style={styles.inputCard}>
         <Card.Content>
           <Title>AI Text Processor</Title>
@@ -141,7 +165,7 @@ const AIHubScreen = () => {
               icon="microphone"
               size={28}
               onPress={handleVoiceInput}
-              color={theme.colors.primary}
+              color={isVoiceInputActive ? theme.colors.error : theme.colors.primary}
             />
             <IconButton
               icon="eraser"

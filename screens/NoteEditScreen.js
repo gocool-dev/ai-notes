@@ -1,76 +1,62 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  StyleSheet,
   View,
+  StyleSheet,
   ScrollView,
-  TouchableOpacity,
   Alert,
-  ActivityIndicator,
+  BackHandler,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  TouchableOpacity,
 } from 'react-native';
 import {
   TextInput,
   IconButton,
-  Chip,
+  Surface,
   Menu,
   Divider,
+  Chip,
   Portal,
-  Dialog,
+  Modal,
   Button,
-  Text
+  Text,
 } from 'react-native-paper';
-import { doc, setDoc, addDoc, collection, deleteDoc } from 'firebase/firestore';
-import { db } from '../services/firebase';
+import { collection, addDoc, updateDoc, doc, Timestamp, deleteDoc } from 'firebase/firestore';
+import { db, auth } from '../services/firebase';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 // Import services
-import voiceService from '../services/voiceService';
-import openaiService from '../services/openai';
-import locationService from '../services/locationService';
-
-// Import components
-import VoiceInput from '../components/VoiceInput';
-import AIActionBar from '../components/AIActionBar';
+import voiceService, { WebSpeechRecognition } from '../services/voiceService';
 
 // Import theme
 import theme from '../config/theme';
 
-const NoteEditScreen = ({ navigation, route }) => {
+const NoteEditScreen = () => {
+  const navigation = useNavigation();
+  const route = useRoute();
   const { note, isNewNote } = route.params;
 
-  // Note state
-  const [title, setTitle] = useState(note.title || '');
-  const [content, setContent] = useState(note.content || '');
-  const [tags, setTags] = useState(note.tags || []);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isEdited, setIsEdited] = useState(false);
-  const [isVoiceInputActive, setIsVoiceInputActive] = useState(false);
+  // Note content state
+  const [title, setTitle] = useState(note?.title || '');
+  const [content, setContent] = useState(note?.content || '');
+  const [tags, setTags] = useState(note?.tags || []);
+  const [tagInput, setTagInput] = useState('');
+  const [unsavedChanges, setUnsavedChanges] = useState(false);
 
-  // AI features state
-  const [isSummarizing, setIsSummarizing] = useState(false);
-  const [showAIActions, setShowAIActions] = useState(false);
-
-  // Tag input state
-  const [showTagDialog, setShowTagDialog] = useState(false);
-  const [newTag, setNewTag] = useState('');
-
-  // Menu state
+  // UI state
   const [menuVisible, setMenuVisible] = useState(false);
-
-  // Refs
+  const [tagModalVisible, setTagModalVisible] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [voiceTarget, setVoiceTarget] = useState('content'); // 'title', 'content', or 'tag'
+  
+  // References
   const titleInputRef = useRef(null);
   const contentInputRef = useRef(null);
+  const tagInputRef = useRef(null);
 
-  // Listen for changes to mark the note as edited
-  useEffect(() => {
-    if (title !== note.title || content !== note.content) {
-      setIsEdited(true);
-    }
-  }, [title, content, note]);
-
-  // Set navigation options
+  // Set up header buttons
   useEffect(() => {
     navigation.setOptions({
       headerRight: () => (
@@ -79,341 +65,257 @@ const NoteEditScreen = ({ navigation, route }) => {
             icon="microphone"
             size={24}
             onPress={handleVoiceInput}
-            disabled={isSaving || isDeleting}
+            color={theme.colors.primary}
           />
           <IconButton
             icon="dots-vertical"
             size={24}
             onPress={() => setMenuVisible(true)}
-            disabled={isSaving || isDeleting}
+            color={theme.colors.primary}
           />
         </View>
       ),
     });
-  }, [navigation, isSaving, isDeleting]);
+  }, [navigation]);
 
-  // Initialize voice service
+  // Detect changes to mark unsaved state
   useEffect(() => {
-    voiceService.initVoiceRecognition();
-    
-    return () => {
-      voiceService.destroyVoiceRecognition();
+    if (
+      title !== (note?.title || '') ||
+      content !== (note?.content || '') ||
+      JSON.stringify(tags) !== JSON.stringify(note?.tags || [])
+    ) {
+      setUnsavedChanges(true);
+    } else {
+      setUnsavedChanges(false);
+    }
+  }, [title, content, tags, note]);
+
+  // Handle back button
+  useEffect(() => {
+    const backAction = () => {
+      if (unsavedChanges) {
+        Alert.alert(
+          'Unsaved Changes',
+          'You have unsaved changes. Are you sure you want to go back?',
+          [
+            { text: 'Stay', style: 'cancel' },
+            { text: 'Discard', style: 'destructive', onPress: () => navigation.goBack() },
+          ]
+        );
+        return true; // Prevent default behavior
+      }
+      return false; // Allow default behavior
     };
-  }, []);
 
-  // Handle back button/navigation
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
-      if (!isEdited || isSaving || isDeleting) {
-        // If not edited or currently saving/deleting, allow navigation
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+
+    return () => backHandler.remove();
+  }, [unsavedChanges, navigation]);
+
+  // Save note
+  const saveNote = async () => {
+    try {
+      if (!title.trim() && !content.trim()) {
+        Alert.alert('Empty Note', 'Please add content to your note before saving.');
         return;
       }
 
-      // Prevent default navigation
-      e.preventDefault();
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('Authentication Required', 'Please sign in to save notes.');
+        return;
+      }
 
-      // Show confirmation dialog
-      Alert.alert(
-        'Unsaved Changes',
-        'You have unsaved changes. Are you sure you want to discard them?',
-        [
-          { text: 'Cancel', style: 'cancel', onPress: () => {} },
-          {
-            text: 'Discard',
-            style: 'destructive',
-            onPress: () => navigation.dispatch(e.data.action),
-          },
-        ]
-      );
-    });
-
-    return unsubscribe;
-  }, [navigation, isEdited, isSaving, isDeleting]);
-
-  // Save note function
-  const saveNote = async () => {
-    if (title.trim() === '' && content.trim() === '') {
-      Alert.alert('Empty Note', 'Please add some content to your note before saving.');
-      return;
-    }
-
-    setIsSaving(true);
-
-    try {
+      const trimmedTitle = title.trim();
       const noteData = {
-        title: title.trim(),
-        content: content.trim(),
+        title: trimmedTitle || 'Untitled Note',
+        content,
         tags,
-        updatedAt: new Date(),
+        userId: currentUser.uid,
+        updatedAt: Timestamp.now(),
       };
 
       if (isNewNote) {
-        // Add created timestamp for new notes
-        noteData.createdAt = new Date();
-        
-        // Create new document in Firestore
+        noteData.createdAt = Timestamp.now();
         await addDoc(collection(db, 'notes'), noteData);
-        Alert.alert('Success', 'Note created successfully!');
       } else {
-        // Update existing document
-        await setDoc(doc(db, 'notes', note.id), noteData, { merge: true });
-        Alert.alert('Success', 'Note updated successfully!');
+        await updateDoc(doc(db, 'notes', note.id), noteData);
       }
-      
-      // Mark as saved and navigate back
-      setIsEdited(false);
+
+      setUnsavedChanges(false);
       navigation.goBack();
     } catch (error) {
       console.error('Error saving note:', error);
-      Alert.alert('Error', 'Failed to save the note. Please try again.');
-    } finally {
-      setIsSaving(false);
+      Alert.alert('Error', 'Failed to save note. Please try again.');
     }
   };
 
-  // Delete note function
+  // Delete note
   const deleteNote = async () => {
-    // Show confirmation first
-    Alert.alert(
-      'Delete Note',
-      'Are you sure you want to delete this note? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setIsDeleting(true);
-            try {
-              if (!isNewNote) {
-                await deleteDoc(doc(db, 'notes', note.id));
-                Alert.alert('Success', 'Note deleted successfully!');
-              }
-              navigation.goBack();
-            } catch (error) {
-              console.error('Error deleting note:', error);
-              Alert.alert('Error', 'Failed to delete the note. Please try again.');
-              setIsDeleting(false);
-            }
-          },
-        },
-      ]
-    );
+    try {
+      if (isNewNote) {
+        navigation.goBack();
+        return;
+      }
+
+      await deleteDoc(doc(db, 'notes', note.id));
+      setDeleteModalVisible(false);
+      navigation.goBack();
+    } catch (error) {
+      console.error('Error deleting note:', error);
+      Alert.alert('Error', 'Failed to delete note. Please try again.');
+    }
   };
 
   // Handle voice input
   const handleVoiceInput = () => {
-    setIsVoiceInputActive(true);
+    // Determine which field is currently active
+    if (titleInputRef.current?.isFocused?.()) {
+      setVoiceTarget('title');
+    } else if (contentInputRef.current?.isFocused?.()) {
+      setVoiceTarget('content');
+    } else if (tagInputRef.current?.isFocused?.()) {
+      setVoiceTarget('tag');
+    } else {
+      // Default to content if no field is focused
+      setVoiceTarget('content');
+    }
     
-    voiceService.performVoiceSearch((result) => {
-      setIsVoiceInputActive(false);
+    setIsVoiceActive(true);
+  };
+  
+  // Handle voice recognition result
+  const handleVoiceMessage = (event) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
       
-      if (!result.error && result.results.length > 0) {
-        // Focus on content and append voice text
-        const dictatedText = result.results[0];
+      if (data.type === 'FINAL' && data.message) {
+        const result = data.message;
         
-        if (contentInputRef.current.isFocused()) {
-          setContent((prevContent) => {
-            return prevContent ? `${prevContent}\n${dictatedText}` : dictatedText;
-          });
-        } else if (titleInputRef.current.isFocused()) {
-          setTitle(dictatedText);
-        } else {
-          // Default to content
-          setContent((prevContent) => {
-            return prevContent ? `${prevContent}\n${dictatedText}` : dictatedText;
-          });
-          contentInputRef.current.focus();
+        // Apply result to the appropriate field
+        switch (voiceTarget) {
+          case 'title':
+            setTitle(prevTitle => {
+              if (prevTitle.trim() === '') {
+                return result;
+              } else {
+                return prevTitle + ' ' + result;
+              }
+            });
+            break;
+            
+          case 'content':
+            setContent(prevContent => {
+              if (prevContent.trim() === '') {
+                return result;
+              } else {
+                return prevContent + ' ' + result;
+              }
+            });
+            break;
+            
+          case 'tag':
+            setTagInput(result);
+            break;
         }
-      } else {
-        Alert.alert('Voice Input', result.message);
+        
+        // Close voice input after getting result
+        setTimeout(() => {
+          setIsVoiceActive(false);
+        }, 1000);
+      } else if (data.type === 'ERROR') {
+        Alert.alert('Voice Input', data.message || 'Error with voice recognition');
+        setIsVoiceActive(false);
       }
-    });
-  };
-
-  // AI summarization
-  const summarizeContent = async () => {
-    if (content.trim().length < 50) {
-      Alert.alert('Too Short', 'Please add more content to summarize (at least 50 characters).');
-      return;
-    }
-
-    setIsSummarizing(true);
-    try {
-      const summary = await openaiService.summarizeText(content);
-      Alert.alert(
-        'AI Summary',
-        summary,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Use as Title',
-            onPress: () => {
-              // Truncate if too long for a title
-              setTitle(summary.length > 100 ? summary.substring(0, 97) + '...' : summary);
-            },
-          },
-          {
-            text: 'Add to Note',
-            onPress: () => {
-              setContent((prevContent) => {
-                return `${prevContent}\n\n### AI Summary:\n${summary}`;
-              });
-            },
-          },
-        ]
-      );
     } catch (error) {
-      console.error('Error summarizing content:', error);
-      Alert.alert('Error', 'Failed to summarize the content. Please try again.');
-    } finally {
-      setIsSummarizing(false);
+      console.error('Error parsing voice message:', error);
+      setIsVoiceActive(false);
     }
   };
 
-  // Extract key information
-  const extractInformation = async () => {
-    if (content.trim().length < 50) {
-      Alert.alert('Too Short', 'Please add more content to analyze (at least 50 characters).');
-      return;
-    }
-
-    setIsSummarizing(true);
-    try {
-      const info = await openaiService.extractInformation(content);
-      
-      // Handle dates, locations, action items, people, and tags
-      if (info.tags && info.tags.length > 0) {
-        // Add AI-suggested tags to existing tags
-        const existingTagSet = new Set(tags);
-        info.tags.forEach(tag => existingTagSet.add(tag));
-        setTags(Array.from(existingTagSet));
-      }
-      
-      // Format extracted info as markdown and add to note
-      let infoText = '\n\n### Key Information (AI-Extracted):\n';
-      
-      if (info.dates && info.dates.length > 0) {
-        infoText += '**Dates**: ' + info.dates.join(', ') + '\n';
-      }
-      
-      if (info.locations && info.locations.length > 0) {
-        infoText += '**Locations**: ' + info.locations.join(', ') + '\n';
-      }
-      
-      if (info.actionItems && info.actionItems.length > 0) {
-        infoText += '**Action Items**:\n';
-        info.actionItems.forEach(item => {
-          infoText += `- ${item}\n`;
-        });
-      }
-      
-      if (info.people && info.people.length > 0) {
-        infoText += '**People**: ' + info.people.join(', ') + '\n';
-      }
-      
-      setContent((prevContent) => {
-        return prevContent + infoText;
-      });
-      
-      Alert.alert('Success', 'Key information extracted and added to your note!');
-    } catch (error) {
-      console.error('Error extracting information:', error);
-      Alert.alert('Error', 'Failed to extract information. Please try again.');
-    } finally {
-      setIsSummarizing(false);
-    }
-  };
-
-  // Add tag function
+  // Add a tag
   const addTag = () => {
-    if (newTag.trim()) {
-      if (!tags.includes(newTag.trim())) {
-        setTags([...tags, newTag.trim()]);
+    if (tagInput.trim()) {
+      const newTag = tagInput.trim();
+      if (!tags.includes(newTag)) {
+        setTags([...tags, newTag]);
       }
-      setNewTag('');
-      setShowTagDialog(false);
+      setTagInput('');
     }
   };
 
-  // Remove tag function
+  // Remove a tag
   const removeTag = (tagToRemove) => {
     setTags(tags.filter((tag) => tag !== tagToRemove));
   };
 
-  // Add location reminder function
-  const addLocationReminder = async () => {
-    const currentLocation = await locationService.getCurrentLocation();
-    
-    if (!currentLocation) {
-      Alert.alert('Location Error', 'Unable to get your current location. Please check your permissions.');
-      return;
-    }
-    
-    const address = await locationService.getAddressFromCoordinates(
-      currentLocation.latitude,
-      currentLocation.longitude
-    );
-    
-    const locationName = address ? address.formattedAddress : 'Current Location';
-    
-    try {
-      await locationService.saveLocationReminder({
-        title: title || 'Untitled Note',
-        note: content,
-        latitude: currentLocation.latitude,
-        longitude: currentLocation.longitude,
-        locationName,
-        radius: 200, // Default radius in meters
-      });
-      
-      Alert.alert('Success', `Location reminder set for: ${locationName}`);
-    } catch (error) {
-      console.error('Error setting location reminder:', error);
-      Alert.alert('Error', 'Failed to set location reminder. Please try again.');
-    }
-  };
-
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : null}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      <ScrollView style={styles.scrollView}>
+      {/* Voice recognition WebView */}
+      {isVoiceActive && (
+        <WebSpeechRecognition
+          onMessage={handleVoiceMessage}
+          hidden={true}
+        />
+      )}
+      
+      {/* Voice input indicator */}
+      {isVoiceActive && (
+        <Portal>
+          <Modal visible={true} dismissable={true} onDismiss={() => setIsVoiceActive(false)}>
+            <View style={styles.voiceModal}>
+              <View style={styles.voiceIndicator}>
+                <Ionicons name="mic" size={32} color="#fff" />
+              </View>
+              <Text style={styles.voiceText}>
+                Listening for {voiceTarget === 'title' ? 'Title' : voiceTarget === 'content' ? 'Content' : 'Tag'}...
+              </Text>
+              <Text style={styles.voiceSubText}>Tap to cancel</Text>
+            </View>
+          </Modal>
+        </Portal>
+      )}
+      
+      <Surface style={styles.headerContainer}>
         <TextInput
           ref={titleInputRef}
           style={styles.titleInput}
           placeholder="Title"
           value={title}
           onChangeText={setTitle}
-          mode="flat"
-          underlineColor="transparent"
-          disabled={isSaving || isDeleting}
+          maxLength={100}
+          multiline
         />
         
         <View style={styles.tagsContainer}>
-          {tags.map((tag) => (
-            <Chip
-              key={tag}
-              style={styles.tag}
-              onClose={() => removeTag(tag)}
-              onPress={() => {}}
-              mode="outlined"
-            >
-              {tag}
-            </Chip>
-          ))}
-          <TouchableOpacity onPress={() => setShowTagDialog(true)}>
-            <Chip
-              icon="plus"
-              style={styles.addTagChip}
-              mode="outlined"
-            >
-              Add Tag
-            </Chip>
-          </TouchableOpacity>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {tags.map((tag) => (
+              <Chip
+                key={tag}
+                style={styles.tag}
+                onClose={() => removeTag(tag)}
+                onPress={() => removeTag(tag)}
+                mode="outlined"
+              >
+                {tag}
+              </Chip>
+            ))}
+            <IconButton
+              icon="tag-plus"
+              size={20}
+              onPress={() => setTagModalVisible(true)}
+              style={styles.addTagButton}
+            />
+          </ScrollView>
         </View>
-        
+      </Surface>
+
+      <ScrollView style={styles.contentContainer}>
         <TextInput
           ref={contentInputRef}
           style={styles.contentInput}
@@ -421,113 +323,155 @@ const NoteEditScreen = ({ navigation, route }) => {
           value={content}
           onChangeText={setContent}
           multiline
-          mode="flat"
-          underlineColor="transparent"
-          disabled={isSaving || isDeleting}
+          scrollEnabled={false} // ScrollView handles scrolling
         />
       </ScrollView>
 
-      {/* AI Action Bar */}
-      <AIActionBar
-        visible={showAIActions}
-        onSummarize={summarizeContent}
-        onExtractInfo={extractInformation}
-        onClose={() => setShowAIActions(false)}
-        isSummarizing={isSummarizing}
-      />
-
-      {/* Voice Input Overlay */}
-      {isVoiceInputActive && <VoiceInput visible={isVoiceInputActive} />}
-
-      {/* Bottom Action Bar */}
-      <View style={styles.bottomBar}>
-        <IconButton
-          icon="brain"
-          size={24}
-          onPress={() => setShowAIActions(!showAIActions)}
-          color={theme.colors.primary}
-        />
-        <IconButton
-          icon="map-marker"
-          size={24}
-          onPress={addLocationReminder}
-          color={theme.colors.primary}
-        />
-        <View style={styles.saveButtonContainer}>
+      <Surface style={styles.footer}>
+        <View style={styles.footerContent}>
+          <Text style={styles.unsavedText}>
+            {unsavedChanges ? 'Unsaved changes' : 'All changes saved'}
+          </Text>
           <Button
             mode="contained"
             onPress={saveNote}
-            disabled={isSaving || isDeleting}
-            loading={isSaving}
+            disabled={!unsavedChanges}
             style={styles.saveButton}
           >
-            {isNewNote ? 'Create' : 'Save'}
+            Save
           </Button>
         </View>
-      </View>
+      </Surface>
 
       {/* Menu */}
       <Menu
         visible={menuVisible}
         onDismiss={() => setMenuVisible(false)}
-        anchor={{ x: 400, y: 50 }}
+        anchor={{ x: theme.dimensions.windowWidth - 20, y: 60 }}
       >
         <Menu.Item
+          onPress={() => {
+            setMenuVisible(false);
+            saveNote();
+          }}
+          title="Save"
+          disabled={!unsavedChanges}
+          icon="content-save"
+        />
+        <Menu.Item
+          onPress={() => {
+            setMenuVisible(false);
+            setTagModalVisible(true);
+          }}
+          title="Manage Tags"
+          icon="tag-multiple"
+        />
+        <Divider />
+        <Menu.Item
+          onPress={() => {
+            setMenuVisible(false);
+            voiceService.speakText(title + '. ' + content);
+          }}
+          title="Read Aloud"
+          icon="text-to-speech"
+        />
+        <Divider />
+        <Menu.Item
+          onPress={() => {
+            setMenuVisible(false);
+            setDeleteModalVisible(true);
+          }}
           title="Delete Note"
           icon="delete"
-          onPress={() => {
-            setMenuVisible(false);
-            deleteNote();
-          }}
-          disabled={isNewNote || isSaving || isDeleting}
-        />
-        <Menu.Item
-          title="Summarize"
-          icon="text-box"
-          onPress={() => {
-            setMenuVisible(false);
-            summarizeContent();
-          }}
-          disabled={isSaving || isDeleting || isSummarizing}
-        />
-        <Menu.Item
-          title="Extract Key Info"
-          icon="information"
-          onPress={() => {
-            setMenuVisible(false);
-            extractInformation();
-          }}
-          disabled={isSaving || isDeleting || isSummarizing}
-        />
-        <Menu.Item
-          title="Read Aloud"
-          icon="volume-high"
-          onPress={() => {
-            setMenuVisible(false);
-            voiceService.speakText(content);
-          }}
-          disabled={isSaving || isDeleting || content.trim() === ''}
+          titleStyle={{ color: theme.colors.error }}
         />
       </Menu>
 
-      {/* Tag Dialog */}
+      {/* Tag Modal */}
       <Portal>
-        <Dialog visible={showTagDialog} onDismiss={() => setShowTagDialog(false)}>
-          <Dialog.Title>Add Tag</Dialog.Title>
-          <Dialog.Content>
+        <Modal
+          visible={tagModalVisible}
+          onDismiss={() => setTagModalVisible(false)}
+          contentContainerStyle={styles.modalContent}
+        >
+          <Text style={styles.modalTitle}>Manage Tags</Text>
+          <View style={styles.tagInputContainer}>
             <TextInput
-              label="Tag Name"
-              value={newTag}
-              onChangeText={setNewTag}
-              mode="outlined"
-              autoCapitalize="none"
+              ref={tagInputRef}
+              style={styles.tagInput}
+              placeholder="Add a tag..."
+              value={tagInput}
+              onChangeText={setTagInput}
+              onSubmitEditing={addTag}
             />
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setShowTagDialog(false)}>Cancel</Button>
-            <Button onPress={addTag}>Add</Button>
-          </Dialog.Actions>
-        </Dialog>
+            <IconButton
+              icon="plus"
+              size={20}
+              onPress={addTag}
+              disabled={!tagInput.trim()}
+            />
+            <IconButton
+              icon="microphone"
+              size={20}
+              onPress={() => {
+                setVoiceTarget('tag');
+                setTagModalVisible(false);
+                setTimeout(() => {
+                  setIsVoiceActive(true);
+                }, 100);
+              }}
+            />
+          </View>
+          <ScrollView style={styles.tagsScrollView}>
+            <View style={styles.tagsList}>
+              {tags.map((tag) => (
+                <Chip
+                  key={tag}
+                  style={styles.tagInModal}
+                  onClose={() => removeTag(tag)}
+                  mode="outlined"
+                >
+                  {tag}
+                </Chip>
+              ))}
+              {tags.length === 0 && (
+                <Text style={styles.noTagsText}>No tags added yet</Text>
+              )}
+            </View>
+          </ScrollView>
+          <Button onPress={() => setTagModalVisible(false)}>Done</Button>
+        </Modal>
+      </Portal>
+
+      {/* Delete Confirmation Modal */}
+      <Portal>
+        <Modal
+          visible={deleteModalVisible}
+          onDismiss={() => setDeleteModalVisible(false)}
+          contentContainerStyle={styles.modalContent}
+        >
+          <Text style={styles.modalTitle}>Delete Note</Text>
+          <Text style={styles.modalText}>
+            Are you sure you want to delete this note? This action cannot be undone.
+          </Text>
+          <View style={styles.modalButtons}>
+            <Button
+              mode="outlined"
+              onPress={() => setDeleteModalVisible(false)}
+              style={styles.cancelButton}
+            >
+              Cancel
+            </Button>
+            <Button
+              mode="contained"
+              onPress={deleteNote}
+              style={styles.deleteButton}
+              buttonColor={theme.colors.error}
+            >
+              Delete
+            </Button>
+          </View>
+        </Modal>
       </Portal>
     </KeyboardAvoidingView>
   );
@@ -536,58 +480,136 @@ const NoteEditScreen = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f5f5f5',
   },
-  scrollView: {
-    flex: 1,
+  headerContainer: {
+    padding: theme.spacing.m,
+    elevation: 2,
+  },
+  headerButtons: {
+    flexDirection: 'row',
   },
   titleInput: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     backgroundColor: 'transparent',
+    paddingHorizontal: 0,
   },
   tagsContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: theme.spacing.s,
+    marginTop: theme.spacing.s,
   },
   tag: {
-    margin: theme.spacing.xs,
+    marginRight: theme.spacing.s,
+    marginVertical: 2,
   },
-  addTagChip: {
-    margin: theme.spacing.xs,
-    backgroundColor: 'transparent',
+  addTagButton: {
+    margin: 0,
+  },
+  contentContainer: {
+    flex: 1,
+    padding: theme.spacing.m,
   },
   contentInput: {
     flex: 1,
-    fontSize: 16,
-    paddingTop: 8,
-    paddingBottom: 100, // Add padding to account for bottom bar
     backgroundColor: 'transparent',
-    minHeight: 300,
+    paddingTop: 0,
+    paddingHorizontal: 0,
+    textAlignVertical: 'top',
   },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing.s,
+  footer: {
+    padding: theme.spacing.m,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
   },
-  saveButtonContainer: {
-    flex: 1,
-    alignItems: 'flex-end',
+  footerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  unsavedText: {
+    color: '#888',
+    fontSize: 14,
   },
   saveButton: {
     borderRadius: 20,
   },
-  headerButtons: {
+  modalContent: {
+    backgroundColor: 'white',
+    padding: theme.spacing.l,
+    margin: theme.spacing.l,
+    borderRadius: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: theme.spacing.m,
+  },
+  modalText: {
+    marginBottom: theme.spacing.m,
+  },
+  modalButtons: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  cancelButton: {
+    flex: 1,
+    marginRight: theme.spacing.s,
+  },
+  deleteButton: {
+    flex: 1,
+    marginLeft: theme.spacing.s,
+  },
+  tagInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.m,
+  },
+  tagInput: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  tagsScrollView: {
+    maxHeight: 200,
+    marginBottom: theme.spacing.m,
+  },
+  tagsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  tagInModal: {
+    margin: 4,
+  },
+  noTagsText: {
+    color: '#888',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: theme.spacing.m,
+  },
+  voiceModal: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: theme.spacing.l,
+    alignItems: 'center',
+    margin: theme.spacing.l,
+  },
+  voiceIndicator: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: theme.colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: theme.spacing.m,
+  },
+  voiceText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: theme.spacing.s,
+  },
+  voiceSubText: {
+    color: '#888',
+    fontSize: 14,
   },
 });
 

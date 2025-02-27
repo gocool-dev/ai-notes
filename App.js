@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Provider as PaperProvider } from 'react-native-paper';
-import { NavigationContainer } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,8 +9,8 @@ import { Ionicons } from '@expo/vector-icons';
 // Import theme
 import theme from './config/theme';
 
-// Import navigation
-import AppNavigator from './navigation/AppNavigator';
+// Import navigation container
+import AppContainer from './navigation/AppContainer';
 
 // Import Firebase configuration
 import { initializeFirebase } from './services/firebase';
@@ -58,10 +57,8 @@ export default function App() {
   return (
     <SafeAreaProvider onLayout={onLayoutRootView}>
       <PaperProvider theme={theme}>
-        <NavigationContainer>
-          <AppNavigator />
-          <StatusBar style="auto" />
-        </NavigationContainer>
+        <AppContainer />
+        <StatusBar style="auto" />
       </PaperProvider>
     </SafeAreaProvider>
   );
